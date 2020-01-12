@@ -5,6 +5,7 @@ import sys
 
 from tothc.bots import TOTHCBot
 from tothc.clients import twitter
+from tothc.logging import configure_logging
 
 
 def parse_args() -> argparse.Namespace:
@@ -35,6 +36,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main():
+    configure_logging()
+
     args = parse_args()
 
     assert args.twitter_consumer_key
