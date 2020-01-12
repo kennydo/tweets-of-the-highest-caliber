@@ -1,2 +1,3 @@
+databases[sqlite]
 peony-twitter
 slackclient
