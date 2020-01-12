@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 from tothc.bots import TOTHCBot
 from tothc.clients import twitter
@@ -10,6 +11,11 @@ from tothc.logging import configure_logging
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        '--sqlite-db',
+        help="Where the SQLite DB file is. If it doesn't exist, a new file will be created.",
+    )
 
     # Twitter arguments
     parser.add_argument(
@@ -40,6 +46,7 @@ def main():
 
     args = parse_args()
 
+    assert args.sqlite_db
     assert args.twitter_consumer_key
     assert args.twitter_consumer_secret
     assert args.twitter_access_token
@@ -56,7 +63,9 @@ def main():
     bot = TOTHCBot(
         twitter_tokens=twitter_tokens,
         slack_token=args.slack_token,
+        sqlite_db_path=Path(args.sqlite_db),
     )
+    bot.initialize()
 
     loop = asyncio.get_event_loop()
     sys.exit(loop.run_until_complete(bot.run()))
