@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import logging
+import re
 import signal
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,11 @@ from tothc.clients import twitter
 
 
 log = logging.getLogger(__name__)
+
+SUBSCRIBE_PATTERNS = [
+    re.compile(r'subscribe (?P<username>[a-zA-Z0-9_]{1,15})\b'),
+    re.compile(r'subscribe .*twitter\.com/(?P<username>[a-zA-Z0-9_]{1,15})\b'),
+]
 
 
 class Datastore:
@@ -148,9 +154,32 @@ class TOTHCBot:
             message = await message_queue.get()
             log.info('Popped message from the Slack queue: %s', message)
 
+            await self._handle_slack_message(message)
+
             message_queue.task_done()
 
         return
+
+    async def _handle_slack_message(self, message: Dict[str, Any]) -> None:
+        if not message.get('text'):
+            return
+
+        text = message['text']
+        channel_id = message['channel']
+
+        for pattern in SUBSCRIBE_PATTERNS:
+            match = pattern.match(text)
+            if match:
+                twitter_username = match.groupdict()['username']
+                log.info('Subscribing to twitter user %s due to text: %s', twitter_username, text)
+
+                await self.subscribe_to_twitter_user(twitter_username)
+
+                await self._slack_client.post_message(
+                    channel=channel_id,
+                    text=f'Subscribed to https://www.twitter.com/{twitter_username}',
+                )
+                break
 
     async def run(self) -> int:
         await self._datastore.db.connect()
@@ -167,7 +196,6 @@ class TOTHCBot:
         await asyncio.gather(
             self._slack_loop(),
             self._twitter_loop(),
-            return_exceptions=True,
         )
 
         return 0

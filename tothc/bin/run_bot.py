@@ -75,7 +75,8 @@ def main():
     bot.initialize()
 
     try:
-        loop.run_until_complete(bot.run())
+        loop.create_task(bot.run())
+        loop.run_forever()
     finally:
         loop.close()
         log.info('Successfuly shut down')
