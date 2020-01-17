@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import logging
+import signal
 from pathlib import Path
 from typing import Any
 from typing import Dict
@@ -44,17 +45,22 @@ class TOTHCBot:
     _twitter_client: twitter.Client
     _slack_client: slack.Client
     _datastore: Datastore
+    _loop: asyncio.AbstractEventLoop
+    _stopped: bool
 
     def __init__(
         self,
         twitter_tokens: twitter.OAuth10aTokens,
         slack_token: str,
         sqlite_db_path: Path,
+        loop: asyncio.AbstractEventLoop,
     ) -> None:
         self._twitter_client = twitter.Client(auth=twitter_tokens)
         self._slack_client = slack.Client(token=slack_token)
 
         self._datastore = Datastore(sqlite_db_path)
+        self._loop = loop
+        self._stopped = False
 
     def initialize(self) -> None:
         self._datastore.ensure_initialized()
@@ -132,21 +138,50 @@ class TOTHCBot:
         )
         return new_tweets
 
+    async def _twitter_loop(self) -> None:
+        return
+
+    async def _slack_loop(self):
+        message_queue = self._slack_client.get_message_queue()
+
+        while not self._stopped:
+            message = await message_queue.get()
+            log.info('Popped message from the Slack queue: %s', message)
+
+            message_queue.task_done()
+
+        return
+
     async def run(self) -> int:
         await self._datastore.db.connect()
 
-        print(await self._datastore.db.fetch_all("select date('now')"))
+        log.info('Starting the RTM client')
+        self._slack_client.start_rtm_client()
 
-        user_id = await self.subscribe_to_twitter_user('kedo48')
+        # The Slack RTM client's start function registers signal handlers for shutdown, so we must register ours after it.
+        signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
+        for s in signals:
+            self._loop.add_signal_handler(s, lambda s=s: asyncio.create_task(self.stop()))
 
-        for x in range(10):
-            latest_tweets = await self.fetch_new_tweets_by_user_id(user_id)
-            log.info('Iteration %s retrieved tweets %s', x, latest_tweets)
-            await asyncio.sleep(5)
-
-        await self._slack_client.post_message(
-            channel='#kedo-dev-2',
-            text='Hello World!',
+        log.info('Starting the loops')
+        await asyncio.gather(
+            self._slack_loop(),
+            self._twitter_loop(),
+            return_exceptions=True,
         )
 
         return 0
+
+    async def stop(self) -> None:
+        log.info('Stopping the bot')
+        self._stopped = True
+
+        tasks = [
+            t for t in asyncio.all_tasks()
+            if t is not asyncio.current_task()
+        ]
+
+        [task.cancel() for task in tasks]
+
+        await asyncio.gather(*tasks)
+        self._loop.stop()

@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import logging
 import os
 import sys
 from pathlib import Path
@@ -7,6 +8,9 @@ from pathlib import Path
 from tothc.bots import TOTHCBot
 from tothc.clients import twitter
 from tothc.logging import configure_logging
+
+
+log = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
@@ -60,15 +64,23 @@ def main():
         access_token_secret=args.twitter_access_token_secret,
     )
 
+    loop = asyncio.get_event_loop()
+
     bot = TOTHCBot(
         twitter_tokens=twitter_tokens,
         slack_token=args.slack_token,
         sqlite_db_path=Path(args.sqlite_db),
+        loop=loop,
     )
     bot.initialize()
 
-    loop = asyncio.get_event_loop()
-    sys.exit(loop.run_until_complete(bot.run()))
+    try:
+        loop.run_until_complete(bot.run())
+    finally:
+        loop.close()
+        log.info('Successfuly shut down')
+
+    sys.exit(0)
 
 
 if __name__ == '__main__':
