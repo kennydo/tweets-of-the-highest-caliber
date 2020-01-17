@@ -1,6 +1,8 @@
 from typing import Any
 from typing import Dict
+from typing import List
 from typing import NamedTuple
+from typing import Optional
 
 import peony.exceptions
 from peony import PeonyClient
@@ -45,3 +47,20 @@ class Client:
             raise UserNotFound(screen_name) from e
 
         return response
+
+    async def get_user_timeline_by_user_id(
+        self,
+        user_id: int,
+        since_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        try:
+            response = await self._peony_client.api.statuses.user_timeline.get(
+                user_id=user_id,
+                since_id=since_id,
+                count=200,
+                include_retweets=True,
+            )
+        except peony.exceptions.DoesNotExist:
+            raise
+
+        return response.data

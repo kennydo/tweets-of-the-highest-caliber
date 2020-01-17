@@ -1,5 +1,10 @@
+import asyncio
+import datetime
 import logging
 from pathlib import Path
+from typing import Any
+from typing import Dict
+from typing import List
 
 import databases
 import sqlalchemy
@@ -54,12 +59,12 @@ class TOTHCBot:
     def initialize(self) -> None:
         self._datastore.ensure_initialized()
 
-    async def subscribe_to_twitter_user(self, screen_name: str) -> None:
+    async def subscribe_to_twitter_user(self, screen_name: str) -> int:
         try:
             twitter_user = await self._twitter_client.get_user_by_screen_name(screen_name)
         except twitter.UserNotFound:
             log.exception('Could not find user with screen name %s', screen_name)
-            return
+            raise
 
         user_id = twitter_user['id']
         latest_screen_name = twitter_user['screen_name']
@@ -90,14 +95,54 @@ class TOTHCBot:
                     ),
                 )
 
+            return user_id
+
+    async def fetch_new_tweets_by_user_id(self, user_id: int) -> List[Dict[str, Any]]:
+        subscription = await self._datastore.db.fetch_one(
+            models.twitter_subscriptions
+            .select()
+            .where(models.twitter_subscriptions.c.user_id == user_id),
+        )
+
+        since_id = subscription[models.twitter_subscriptions.c.latest_tweet_id]
+
+        timeline = await self._twitter_client.get_user_timeline_by_user_id(user_id, since_id=since_id)
+        log.info('Fetched %s tweets in timeline of user %s since ID %s', len(timeline), user_id, since_id)
+
+        if since_id:
+            new_tweets = timeline
+        else:
+            # This is our first fetch for the user, so don't consider anything new
+            new_tweets = []
+
+        latest_tweet_id = since_id
+        if timeline:
+            latest_tweet_id = timeline[0]['id']
+
+        # Now we must update our subscription information
+        log.info('Updating latest tweet ID of user %s to %s', user_id, latest_tweet_id)
+        await self._datastore.db.execute(
+            models.twitter_subscriptions
+            .update()
+            .where(models.twitter_subscriptions.c.user_id == user_id)
+            .values(
+                refreshed_at=datetime.datetime.utcnow(),
+                latest_tweet_id=latest_tweet_id,
+            ),
+        )
+        return new_tweets
+
     async def run(self) -> int:
         await self._datastore.db.connect()
 
         print(await self._datastore.db.fetch_all("select date('now')"))
 
-        await self.subscribe_to_twitter_user('kedo48')
-        await self.subscribe_to_twitter_user('nontedissdfsdfsdf')
-        await self.subscribe_to_twitter_user('kedo48')
+        user_id = await self.subscribe_to_twitter_user('kedo48')
+
+        for x in range(10):
+            latest_tweets = await self.fetch_new_tweets_by_user_id(user_id)
+            log.info('Iteration %s retrieved tweets %s', x, latest_tweets)
+            await asyncio.sleep(5)
 
         await self._slack_client.post_message(
             channel='#kedo-dev-2',
