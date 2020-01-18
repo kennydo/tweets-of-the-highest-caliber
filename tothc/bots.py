@@ -1,5 +1,4 @@
 import asyncio
-import datetime
 import logging
 import re
 import signal
@@ -11,6 +10,7 @@ from typing import List
 import databases
 import sqlalchemy
 
+from tothc import managers
 from tothc import models
 from tothc.clients import slack
 from tothc.clients import twitter
@@ -79,44 +79,21 @@ class TOTHCBot:
             raise
 
         user_id = twitter_user['id']
-        latest_screen_name = twitter_user['screen_name']
+        screen_name = twitter_user['screen_name']
 
-        async with self._datastore.db.transaction():
-            existing_subscription = await self._datastore.db.fetch_one(
-                models.twitter_subscriptions
-                .select()
-                .where(models.twitter_subscriptions.c.user_id == user_id),
-            )
-
-            if existing_subscription:
-                log.info('Updating existing subscription for user ID %s (%s)', user_id, latest_screen_name)
-                await self._datastore.db.execute(
-                    models.twitter_subscriptions
-                    .update()
-                    .where(models.twitter_subscriptions.c.user_id == user_id)
-                    .values(latest_screen_name=latest_screen_name),
-                )
-            else:
-                log.info('Adding new subscription for user ID %s (%s)', user_id, latest_screen_name)
-                await self._datastore.db.execute(
-                    models.twitter_subscriptions
-                    .insert()
-                    .values(
-                        user_id=user_id,
-                        latest_screen_name=latest_screen_name,
-                    ),
-                )
-
-            return user_id
-
-    async def fetch_new_tweets_by_user_id(self, user_id: int) -> List[Dict[str, Any]]:
-        subscription = await self._datastore.db.fetch_one(
-            models.twitter_subscriptions
-            .select()
-            .where(models.twitter_subscriptions.c.user_id == user_id),
+        await managers.TwitterSubscriptionManager.upsert_subscription(
+            self._datastore.db.connection(),
+            user_id=user_id,
+            screen_name=screen_name,
         )
 
-        since_id = subscription[models.twitter_subscriptions.c.latest_tweet_id]
+        return user_id
+
+    async def fetch_new_tweets_by_user_id(self, user_id: int) -> List[Dict[str, Any]]:
+        since_id = await managers.TwitterSubscriptionManager.get_latest_tweet_id_for_user_id(
+            self._datastore.db.connection(),
+            user_id=user_id,
+        )
 
         timeline = await self._twitter_client.get_user_timeline_by_user_id(user_id, since_id=since_id)
         log.info('Fetched %s tweets in timeline of user %s since ID %s', len(timeline), user_id, since_id)
@@ -132,15 +109,10 @@ class TOTHCBot:
             latest_tweet_id = timeline[0]['id']
 
         # Now we must update our subscription information
-        log.info('Updating latest tweet ID of user %s to %s', user_id, latest_tweet_id)
-        await self._datastore.db.execute(
-            models.twitter_subscriptions
-            .update()
-            .where(models.twitter_subscriptions.c.user_id == user_id)
-            .values(
-                refreshed_at=datetime.datetime.utcnow(),
-                latest_tweet_id=latest_tweet_id,
-            ),
+        await managers.TwitterSubscriptionManager.update_latest_tweet_id(
+            self._datastore.db.connection(),
+            user_id=user_id,
+            latest_tweet_id=latest_tweet_id,
         )
         return new_tweets
 

@@ -8,7 +8,8 @@ twitter_subscriptions = sa.Table(
     metadata,
     sa.Column('id', sa.Integer, primary_key=True),
     sa.Column('user_id', sa.Integer, nullable=False, unique=True),
-    sa.Column('refreshed_at', sa.DateTime),
-    sa.Column('latest_screen_name', sa.String),
+    sa.Column('screen_name', sa.String),
+
     sa.Column('latest_tweet_id', sa.Integer),
+    sa.Column('refreshed_latest_tweet_id_at', sa.DateTime),
 )
