@@ -19,6 +19,10 @@ async def _enqueue_message(**payload) -> None:
         log.debug('Ignoring bot message: %s', message_data)
         return
 
+    if message_data.get('hidden'):
+        log.debug('Ignoring hidden message: %s', message_data)
+        return
+
     await _message_queue.put(payload['data'])
 
 

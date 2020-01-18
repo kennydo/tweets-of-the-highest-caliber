@@ -145,9 +145,9 @@ class TOTHCBot:
 
             url = tweet.url_of_content()
             if tweet.is_retweet():
-                text = f'<https://www.twitter.com/{screen_name}|{screen_name}> retweeted {url}'
+                text = f'<https://www.twitter.com/{screen_name}|{screen_name}> retweeted <{url}>'
             else:
-                text = f'<https://www.twitter.com/{screen_name}|{screen_name}> tweeted {url}'
+                text = f'<https://www.twitter.com/{screen_name}|{screen_name}> tweeted <{url}>'
 
             await self._slack_client.post_message(
                 channel=self._slack_channel,
