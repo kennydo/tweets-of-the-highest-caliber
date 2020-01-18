@@ -115,7 +115,7 @@ class TOTHCBot:
             )
 
         timeline = await self._twitter_client.get_user_timeline_by_user_id(user_id, since_id=since_id)
-        log.info('Fetched %s tweets in timeline of user %s since ID %s', len(timeline), user_id, since_id)
+        log.info('Fetched %s tweets in timeline of user %s since ID %s', len(timeline.tweets), user_id, since_id)
 
         if since_id:
             new_tweets = timeline.tweets
