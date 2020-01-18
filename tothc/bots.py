@@ -22,6 +22,10 @@ SUBSCRIBE_PATTERNS = [
     re.compile(r'subscribe (?P<username>[a-zA-Z0-9_]{1,15})\b'),
     re.compile(r'subscribe .*twitter\.com/(?P<username>[a-zA-Z0-9_]{1,15})\b'),
 ]
+UNSUBSCRIBE_PATTERNS = [
+    re.compile(r'unsubscribe (?P<username>[a-zA-Z0-9_]{1,15})\b'),
+    re.compile(r'unsubscribe .*twitter\.com/(?P<username>[a-zA-Z0-9_]{1,15})\b'),
+]
 
 
 class Datastore:
@@ -81,19 +85,36 @@ class TOTHCBot:
         user_id = twitter_user['id']
         screen_name = twitter_user['screen_name']
 
-        await managers.TwitterSubscriptionManager.upsert_subscription(
-            self._datastore.db.connection(),
-            user_id=user_id,
-            screen_name=screen_name,
-        )
+        async with self._connection() as conn:
+            await managers.TwitterSubscriptionManager.subscribe(
+                conn,
+                user_id=user_id,
+                screen_name=screen_name,
+            )
 
         return user_id
 
+    async def unsubscribe_from_twitter_user(self, screen_name: str) -> None:
+        try:
+            twitter_user = await self._twitter_client.get_user_by_screen_name(screen_name)
+        except twitter.UserNotFound:
+            log.exception('Could not find user with screen name %s', screen_name)
+            raise
+
+        user_id = twitter_user['id']
+
+        async with self._connection() as conn:
+            await managers.TwitterSubscriptionManager.unsubscribe(
+                conn,
+                user_id=user_id,
+            )
+
     async def fetch_new_tweets_by_user_id(self, user_id: int) -> List[twitter.Tweet]:
-        since_id = await managers.TwitterSubscriptionManager.get_latest_tweet_id_for_user_id(
-            self._datastore.db.connection(),
-            user_id=user_id,
-        )
+        async with self._connection() as conn:
+            since_id = await managers.TwitterSubscriptionManager.get_latest_tweet_id_for_user_id(
+                conn,
+                user_id=user_id,
+            )
 
         timeline = await self._twitter_client.get_user_timeline_by_user_id(user_id, since_id=since_id)
         log.info('Fetched %s tweets in timeline of user %s since ID %s', len(timeline), user_id, since_id)
@@ -109,11 +130,12 @@ class TOTHCBot:
             latest_tweet_id = timeline.tweets[0].data['id']
 
         # Now we must update our subscription information
-        await managers.TwitterSubscriptionManager.update_latest_tweet_id(
-            self._datastore.db.connection(),
-            user_id=user_id,
-            latest_tweet_id=latest_tweet_id,
-        )
+        async with self._connection() as conn:
+            await managers.TwitterSubscriptionManager.update_latest_tweet_id(
+                conn,
+                user_id=user_id,
+                latest_tweet_id=latest_tweet_id,
+            )
         return new_tweets
 
     async def _twitter_loop(self) -> None:
@@ -145,20 +167,28 @@ class TOTHCBot:
                 twitter_username = match.groupdict()['username']
                 log.info('Subscribing to twitter user %s due to text: %s', twitter_username, text)
 
-                user_id = await self.subscribe_to_twitter_user(twitter_username)
-
+                await self.subscribe_to_twitter_user(twitter_username)
                 await self._slack_client.post_message(
                     channel=channel_id,
                     text=f'Subscribed to https://www.twitter.com/{twitter_username}',
                 )
+                return
 
-                timeline = await self._twitter_client.get_user_timeline_by_user_id(user_id)
-                for tweet in timeline.tweets:
-                    typ = 'Retweet' if tweet.is_retweet() else 'Original'
-                    med = 'with media' if tweet.has_media() else 'without media'
+        for pattern in UNSUBSCRIBE_PATTERNS:
+            match = pattern.match(text)
+            if match:
+                twitter_username = match.groupdict()['username']
+                log.info('Unubscribing from twitter user %s due to text: %s', twitter_username, text)
 
-                    log.info('%s %s: %s', typ, med, tweet.url_of_original_content())
-                break
+                await self.unsubscribe_from_twitter_user(twitter_username)
+                await self._slack_client.post_message(
+                    channel=channel_id,
+                    text=f'Unsubscribed from https://www.twitter.com/{twitter_username}',
+                )
+                return
+
+    def _connection(self) -> databases.core.Connection:
+        return self._datastore.db.connection()
 
     def _loop_exception_handler(self, loop: asyncio.AbstractEventLoop, context: Dict[str, Any]) -> None:
         log.error('Caught exception: %s', context)

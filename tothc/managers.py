@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 
 class TwitterSubscriptionManager:
     @classmethod
-    async def upsert_subscription(
+    async def subscribe(
         cls,
         connection: Connection,
         *,
@@ -19,6 +19,7 @@ class TwitterSubscriptionManager:
         screen_name: str,
     ) -> None:
         async with connection.transaction():
+            # This subscription might be inactive.
             existing_subscription = await connection.fetch_one(
                 models.twitter_subscriptions
                 .select()
@@ -26,13 +27,20 @@ class TwitterSubscriptionManager:
             )
 
             if existing_subscription:
-                log.info('Updating existing subscription for user ID %s (%s)', user_id, screen_name)
-                await connection.execute(
-                    models.twitter_subscriptions
-                    .update()
-                    .where(models.twitter_subscriptions.c.user_id == user_id)
-                    .values(screen_name=screen_name),
-                )
+                if existing_subscription[models.twitter_subscriptions.c.unsubscribed_at]:
+                    log.info('Re-enabling existing subscription for user ID %s (%s)', user_id, screen_name)
+                    await connection.execute(
+                        models.twitter_subscriptions
+                        .update()
+                        .where(models.twitter_subscriptions.c.user_id == user_id)
+                        .values(
+                            screen_name=screen_name,
+                            subscribed_at=datetime.datetime.utcnow(),
+                            unsubscribed_at=None,
+                        ),
+                    )
+                else:
+                    log.info('User ID %s (%s) already has an active subscription', user_id, screen_name)
             else:
                 log.info('Adding new subscription for user ID %s (%s)', user_id, screen_name)
                 await connection.execute(
@@ -41,8 +49,45 @@ class TwitterSubscriptionManager:
                     .values(
                         user_id=user_id,
                         screen_name=screen_name,
+                        subscribed_at=datetime.datetime.utcnow(),
                     ),
                 )
+
+    @classmethod
+    async def unsubscribe(
+        cls,
+        connection: Connection,
+        *,
+        user_id: int,
+    ) -> None:
+        log.info('Unsubscribing from user ID %s', user_id)
+        await connection.execute(
+            models.twitter_subscriptions
+            .update()
+            .where(models.twitter_subscriptions.c.user_id == user_id)
+            .values(
+                unsubscribed_at=datetime.datetime.utcnow(),
+                latest_tweet_id=None,
+                refreshed_latest_tweet_id_at=None,
+            ),
+        )
+
+    @classmethod
+    async def update_screen_name(
+        cls,
+        connection: Connection,
+        *,
+        user_id: int,
+        screen_name: str,
+    ) -> None:
+        await connection.execute(
+            models.twitter_subscriptions
+            .update()
+            .where(models.twitter_subscriptions.c.user_id == user_id)
+            .values(
+                screen_name=screen_name,
+            ),
+        )
 
     @classmethod
     async def get_latest_tweet_id_for_user_id(
