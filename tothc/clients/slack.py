@@ -16,7 +16,7 @@ async def _enqueue_message(**payload) -> None:
     message_data = payload['data']
 
     if message_data.get('subtype') == 'bot_message':
-        log.info('Ignoring bot message: %s', message_data)
+        log.debug('Ignoring bot message: %s', message_data)
         return
 
     await _message_queue.put(payload['data'])
