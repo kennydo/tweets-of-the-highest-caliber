@@ -181,7 +181,15 @@ class TOTHCBot:
                 )
                 break
 
+    def _loop_exception_handler(self, loop: asyncio.AbstractEventLoop, context: Dict[str, Any]) -> None:
+        log.error('Caught exception: %s', context)
+
+        self._loop.default_exception_handler(context)
+        asyncio.create_task(self.stop())
+
     async def run(self) -> int:
+        self._loop.set_exception_handler(self._loop_exception_handler)
+
         await self._datastore.db.connect()
 
         log.info('Starting the RTM client')
@@ -190,7 +198,7 @@ class TOTHCBot:
         # The Slack RTM client's start function registers signal handlers for shutdown, so we must register ours after it.
         signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
         for s in signals:
-            self._loop.add_signal_handler(s, lambda s=s: asyncio.create_task(self.stop()))
+            self._loop.add_signal_handler(s, self._create_signal_handler(s))
 
         log.info('Starting the loops')
         await asyncio.gather(
@@ -199,6 +207,16 @@ class TOTHCBot:
         )
 
         return 0
+
+    def _create_signal_handler(self, s: signal.Signals):
+        def signal_handler():
+            async def handle_signal():
+                log.info('Received signal %s', s.name)
+                await self.stop()
+
+            return asyncio.create_task(handle_signal())
+
+        return signal_handler
 
     async def stop(self) -> None:
         log.info('Stopping the bot')
@@ -209,7 +227,11 @@ class TOTHCBot:
             if t is not asyncio.current_task()
         ]
 
+        log.info('Cancelling %s tasks', len(tasks))
         [task.cancel() for task in tasks]
 
-        await asyncio.gather(*tasks)
+        log.info('Waiting for tasks to finish')
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        log.info('Stopping the loop')
         self._loop.stop()
