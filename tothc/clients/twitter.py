@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any
 from typing import Dict
 from typing import List
@@ -23,6 +25,44 @@ class OAuth10aTokens(NamedTuple):
     consumer_secret: str
     access_token: str
     access_token_secret: str
+
+
+class Tweet(NamedTuple):
+    data: Dict[str, Any]
+
+    @classmethod
+    def from_data(cls, data: Dict[str, Any]) -> Tweet:
+        return cls(data=data)
+
+    def has_media(self) -> bool:
+        return bool(self.data.get('entities', {}).get('media'))
+
+    def is_retweet(self) -> bool:
+        return bool(self.data.get('retweeted_status'))
+
+    def url_of_original_content(self) -> str:
+        """Either the URL of the tweet itself, or the URL of the tweet it's a retweet of.
+        """
+        if self.is_retweet():
+            screen_name = self.data['retweeted_status']['user']['screen_name']
+            tweet_id = self.data['retweeted_status']['id']
+        else:
+            screen_name = self.data['user']['screen_name']
+            tweet_id = self.data['id']
+        return f'https://www.twitter.com/{screen_name}/status/{tweet_id}'
+
+
+class Timeline(NamedTuple):
+    tweets: List[Tweet]
+
+    @classmethod
+    def from_data(cls, data: List[Dict[str, Any]]) -> Timeline:
+        return cls(
+            tweets=[
+                Tweet.from_data(tweet)
+                for tweet in data
+            ],
+        )
 
 
 class Client:
@@ -52,7 +92,7 @@ class Client:
         self,
         user_id: int,
         since_id: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> Timeline:
         try:
             response = await self._peony_client.api.statuses.user_timeline.get(
                 user_id=user_id,
@@ -63,4 +103,4 @@ class Client:
         except peony.exceptions.DoesNotExist:
             raise
 
-        return response.data
+        return Timeline.from_data(response.data)

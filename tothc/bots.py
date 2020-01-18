@@ -89,7 +89,7 @@ class TOTHCBot:
 
         return user_id
 
-    async def fetch_new_tweets_by_user_id(self, user_id: int) -> List[Dict[str, Any]]:
+    async def fetch_new_tweets_by_user_id(self, user_id: int) -> List[twitter.Tweet]:
         since_id = await managers.TwitterSubscriptionManager.get_latest_tweet_id_for_user_id(
             self._datastore.db.connection(),
             user_id=user_id,
@@ -99,14 +99,14 @@ class TOTHCBot:
         log.info('Fetched %s tweets in timeline of user %s since ID %s', len(timeline), user_id, since_id)
 
         if since_id:
-            new_tweets = timeline
+            new_tweets = timeline.tweets
         else:
             # This is our first fetch for the user, so don't consider anything new
             new_tweets = []
 
         latest_tweet_id = since_id
         if timeline:
-            latest_tweet_id = timeline[0]['id']
+            latest_tweet_id = timeline.tweets[0].data['id']
 
         # Now we must update our subscription information
         await managers.TwitterSubscriptionManager.update_latest_tweet_id(
@@ -145,12 +145,19 @@ class TOTHCBot:
                 twitter_username = match.groupdict()['username']
                 log.info('Subscribing to twitter user %s due to text: %s', twitter_username, text)
 
-                await self.subscribe_to_twitter_user(twitter_username)
+                user_id = await self.subscribe_to_twitter_user(twitter_username)
 
                 await self._slack_client.post_message(
                     channel=channel_id,
                     text=f'Subscribed to https://www.twitter.com/{twitter_username}',
                 )
+
+                timeline = await self._twitter_client.get_user_timeline_by_user_id(user_id)
+                for tweet in timeline.tweets:
+                    typ = 'Retweet' if tweet.is_retweet() else 'Original'
+                    med = 'with media' if tweet.has_media() else 'without media'
+
+                    log.info('%s %s: %s', typ, med, tweet.url_of_original_content())
                 break
 
     def _loop_exception_handler(self, loop: asyncio.AbstractEventLoop, context: Dict[str, Any]) -> None:
