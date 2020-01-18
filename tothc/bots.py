@@ -95,18 +95,10 @@ class TOTHCBot:
         return user_id
 
     async def unsubscribe_from_twitter_user(self, screen_name: str) -> None:
-        try:
-            twitter_user = await self._twitter_client.get_user_by_screen_name(screen_name)
-        except twitter.UserNotFound:
-            log.exception('Could not find user with screen name %s', screen_name)
-            raise
-
-        user_id = twitter_user['id']
-
         async with self._connection() as conn:
             await managers.TwitterSubscriptionManager.unsubscribe(
                 conn,
-                user_id=user_id,
+                screen_name=screen_name,
             )
 
     async def fetch_new_tweets_by_user_id(self, user_id: int) -> List[twitter.Tweet]:
@@ -167,10 +159,16 @@ class TOTHCBot:
                 twitter_username = match.groupdict()['username']
                 log.info('Subscribing to twitter user %s due to text: %s', twitter_username, text)
 
-                await self.subscribe_to_twitter_user(twitter_username)
+                text = f'Subscribed to <https://www.twitter.com/{twitter_username}|{twitter_username}>'
+
+                try:
+                    await self.subscribe_to_twitter_user(twitter_username)
+                except twitter.UserNotFound:
+                    text = f'No twitter user name {twitter_username} found'
+
                 await self._slack_client.post_message(
                     channel=channel_id,
-                    text=f'Subscribed to https://www.twitter.com/{twitter_username}',
+                    text=text,
                 )
                 return
 
@@ -191,10 +189,9 @@ class TOTHCBot:
         return self._datastore.db.connection()
 
     def _loop_exception_handler(self, loop: asyncio.AbstractEventLoop, context: Dict[str, Any]) -> None:
-        log.error('Caught exception: %s', context)
+        log.info('Loop handled an exception, but might not actually be an issue: %s', context)
 
         self._loop.default_exception_handler(context)
-        asyncio.create_task(self.stop())
 
     async def run(self) -> int:
         self._loop.set_exception_handler(self._loop_exception_handler)

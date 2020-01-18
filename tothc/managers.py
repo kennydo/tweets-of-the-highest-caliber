@@ -58,13 +58,17 @@ class TwitterSubscriptionManager:
         cls,
         connection: Connection,
         *,
-        user_id: int,
+        screen_name: str,
     ) -> None:
-        log.info('Unsubscribing from user ID %s', user_id)
+        """We unsubscribe based on the screen name in our DB instead of the user ID because
+        screen names can change, and users can get into bad states (ex: suspended) that prevent
+        us from fetching their ID.
+        """
+        log.info('Unsubscribing from screen name %s', screen_name)
         await connection.execute(
             models.twitter_subscriptions
             .update()
-            .where(models.twitter_subscriptions.c.user_id == user_id)
+            .where(models.twitter_subscriptions.c.screen_name.ilike(screen_name))
             .values(
                 unsubscribed_at=datetime.datetime.utcnow(),
                 latest_tweet_id=None,
