@@ -57,6 +57,7 @@ class Datastore:
 class TOTHCBot:
     _twitter_client: twitter.Client
     _slack_client: slack.Client
+    _slack_channel: str
     _datastore: Datastore
     _loop: asyncio.AbstractEventLoop
     _stopped: bool
@@ -65,11 +66,13 @@ class TOTHCBot:
         self,
         twitter_tokens: twitter.OAuth10aTokens,
         slack_token: str,
+        slack_channel: str,
         sqlite_db_path: Path,
         loop: asyncio.AbstractEventLoop,
     ) -> None:
         self._twitter_client = twitter.Client(auth=twitter_tokens)
         self._slack_client = slack.Client(token=slack_token)
+        self._slack_channel = slack_channel
 
         self._datastore = Datastore(sqlite_db_path)
         self._loop = loop
@@ -134,7 +137,22 @@ class TOTHCBot:
 
         # Now we deal with the new tweets
         for tweet in new_tweets:
-            log.info('New tweet from user %s (has_media=%s): %s', user_id, tweet.has_media(), tweet.url_of_content())
+            screen_name = tweet.data['user']['screen_name']
+            log.info('New tweet from user %s (has_media=%s): %s', screen_name, tweet.has_media(), tweet.url_of_content())
+
+            if not tweet.has_media():
+                continue
+
+            url = tweet.url_of_content()
+            if tweet.is_retweet():
+                text = f'<https://www.twitter.com/{screen_name}|{screen_name}> retweeted {url}'
+            else:
+                text = f'<https://www.twitter.com/{screen_name}|{screen_name}> tweeted {url}'
+
+            await self._slack_client.post_message(
+                channel=self._slack_channel,
+                text=text,
+            )
 
     async def _twitter_loop(self) -> None:
         while not self._stopped:

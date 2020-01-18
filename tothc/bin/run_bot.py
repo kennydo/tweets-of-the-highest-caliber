@@ -42,6 +42,8 @@ def parse_args() -> argparse.Namespace:
     # Slack arguments
     parser.add_argument('--slack-token', default=os.environ.get('SLACK_TOKEN'))
 
+    parser.add_argument('--slack-channel', help='The channel the tweets should be sent to')
+
     return parser.parse_args()
 
 
@@ -56,6 +58,7 @@ def main():
     assert args.twitter_access_token
     assert args.twitter_access_token_secret
     assert args.slack_token
+    assert args.slack_channel
 
     twitter_tokens = twitter.OAuth10aTokens(
         consumer_key=args.twitter_consumer_key,
@@ -69,6 +72,7 @@ def main():
     bot = TOTHCBot(
         twitter_tokens=twitter_tokens,
         slack_token=args.slack_token,
+        slack_channel=args.slack_channel,
         sqlite_db_path=Path(args.sqlite_db),
         loop=loop,
     )
