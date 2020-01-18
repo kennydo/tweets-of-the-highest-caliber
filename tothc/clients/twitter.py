@@ -40,7 +40,7 @@ class Tweet(NamedTuple):
     def is_retweet(self) -> bool:
         return bool(self.data.get('retweeted_status'))
 
-    def url_of_original_content(self) -> str:
+    def url_of_content(self) -> str:
         """Either the URL of the tweet itself, or the URL of the tweet it's a retweet of.
         """
         if self.is_retweet():

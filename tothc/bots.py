@@ -5,7 +5,6 @@ import signal
 from pathlib import Path
 from typing import Any
 from typing import Dict
-from typing import List
 
 import databases
 import sqlalchemy
@@ -26,6 +25,10 @@ UNSUBSCRIBE_PATTERNS = [
     re.compile(r'unsubscribe (?P<username>[a-zA-Z0-9_]{1,15})\b'),
     re.compile(r'unsubscribe .*twitter\.com/(?P<username>[a-zA-Z0-9_]{1,15})\b'),
 ]
+
+# The timeline endpoint has a rate limit of 900 requests per 15 minute window.
+# This determines how long the bot waits between its batches of polling.
+TWITTER_TIMELINE_POLL_PERIOD_SEC = 100
 
 
 class Datastore:
@@ -101,7 +104,7 @@ class TOTHCBot:
                 screen_name=screen_name,
             )
 
-    async def fetch_new_tweets_by_user_id(self, user_id: int) -> List[twitter.Tweet]:
+    async def _handle_polling_twitter_user_id(self, user_id: int) -> None:
         async with self._connection() as conn:
             since_id = await managers.TwitterSubscriptionManager.get_latest_tweet_id_for_user_id(
                 conn,
@@ -118,7 +121,7 @@ class TOTHCBot:
             new_tweets = []
 
         latest_tweet_id = since_id
-        if timeline:
+        if timeline.tweets:
             latest_tweet_id = timeline.tweets[0].data['id']
 
         # Now we must update our subscription information
@@ -128,9 +131,28 @@ class TOTHCBot:
                 user_id=user_id,
                 latest_tweet_id=latest_tweet_id,
             )
-        return new_tweets
+
+        # Now we deal with the new tweets
+        for tweet in new_tweets:
+            log.info('New tweet from user %s (has_media=%s): %s', user_id, tweet.has_media(), tweet.url_of_content())
 
     async def _twitter_loop(self) -> None:
+        while not self._stopped:
+            async with self._connection() as conn:
+                user_ids = await managers.TwitterSubscriptionManager.list_user_ids_of_active_subscriptions(
+                    conn,
+                )
+
+                log.info('Got %s active twitter subscriptions: %s', len(user_ids), user_ids)
+
+                tasks = {
+                    asyncio.create_task(self._handle_polling_twitter_user_id(user_id))
+                    for user_id in user_ids
+                }
+                await asyncio.wait(tasks)
+                log.info('Finished polling tasks for %s user ids', len(user_ids))
+
+            await asyncio.sleep(TWITTER_TIMELINE_POLL_PERIOD_SEC)
         return
 
     async def _slack_loop(self):

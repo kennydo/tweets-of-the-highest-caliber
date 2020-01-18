@@ -1,5 +1,6 @@
 import datetime
 import logging
+from typing import List
 
 from databases.core import Connection
 
@@ -126,3 +127,17 @@ class TwitterSubscriptionManager:
                 latest_tweet_id=latest_tweet_id,
             ),
         )
+
+    @classmethod
+    async def list_user_ids_of_active_subscriptions(
+        cls,
+        connection: Connection,
+    ) -> List[int]:
+        result = await connection.fetch_all(
+            models.twitter_subscriptions
+            .select()
+            .where(
+                models.twitter_subscriptions.c.unsubscribed_at.is_(None),
+            ),
+        )
+        return [row[models.twitter_subscriptions.c.user_id] for row in result]
