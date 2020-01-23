@@ -99,6 +99,7 @@ class Client:
                 since_id=since_id,
                 count=200,
                 include_retweets=True,
+                tweet_mode='extended',
             )
         except peony.exceptions.DoesNotExist:
             raise
