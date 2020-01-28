@@ -143,6 +143,10 @@ class TOTHCBot:
             if not tweet.has_media():
                 continue
 
+            if tweet.is_retweet() and tweet.data['retweeted_status']['user']['id'] == tweet.data['user']['id']:
+                log.info('Ignoring tweet %s because it was a self-retweet', tweet.data['id'])
+                continue
+
             url = tweet.url_of_content()
             if tweet.is_retweet():
                 text = f'<https://www.twitter.com/{screen_name}|{screen_name}> retweeted <{url}>'
